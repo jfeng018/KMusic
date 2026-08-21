@@ -65,7 +65,7 @@ function cacheSet(key, val) {
 }
 
 // ========== 工具函数 ==========
-function httpGet(url, { timeout = 10000, headers = {} } = {}) {
+function httpGet(url, { timeout = 5000, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     request(url, { method: 'GET', timeout, headers: { Accept: 'application/json', ...headers } }, (err, resp) => {
       if (err) return reject(new Error(err.message))
@@ -278,30 +278,25 @@ const CHAINS = {
 
 async function getUrlWithFallback(platform, songInfo, quality) {
   const chain = CHAINS[platform]
-  if (!chain) throw new Error('不支持的平台')
+  if (!chain || !chain.length) throw new Error('不支持的平台')
 
   const key = `url_${platform}_${getSongId(songInfo)}_${quality}`
   const cached = cacheGet(key)
   if (cached) return cached
 
-  // Phase 1: 前3个源并发竞速
-  const concurrent = chain.slice(0, 3)
+  // 全源极速并发竞速：所有可用音源同时发起竞争，第一个成功返回有效直链即胜出
   try {
-    const url = await Promise.any(concurrent.map(s => s.fn(songInfo, quality).then(validateUrl)))
+    const tasks = chain.map(s =>
+      Promise.resolve()
+        .then(() => s.fn(songInfo, quality))
+        .then(validateUrl)
+    )
+    const url = await Promise.any(tasks)
     cacheSet(key, url)
     return url
-  } catch {}
-
-  // Phase 2: 剩余源顺序尝试
-  for (const s of chain.slice(3)) {
-    try {
-      const url = validateUrl(await s.fn(songInfo, quality))
-      cacheSet(key, url)
-      return url
-    } catch { continue }
+  } catch (err) {
+    throw new Error('所有音源均解析失败')
   }
-
-  throw new Error('所有音源均失败')
 }
 
 // ========== 事件处理 ==========
@@ -440,4 +435,4 @@ send(EVENT_NAMES.inited, {
   }
 })
 
-console.log('[非常刀] v4 已加载 - 网易/QQ/酷我/酷狗/咪咕/汽水 多源聚合')
+console.log('[非常刀] v5 已加载 - 网易/QQ/酷我/酷狗/咪咕/汽水 多源聚合')
